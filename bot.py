@@ -1,11 +1,14 @@
+from datetime import datetime, timezone, timedelta
 import googleapi
 import telebot
 import todoistapi
 import urllib.parse
+import re
 import requests
 from fastapi import FastAPI, Request
 import threading
 import uvicorn
+import json
 from config import BOT_TOKEN, GOOGLE_CLIENT_ID, TODOIST_CLIENT_ID, GOOGLE_CLIENT_SECRET, TODOIST_CLIENT_SECRET,\
     YANDEX_IAM_TOKEN
 
@@ -221,32 +224,6 @@ def process_task_creation(message, project_id):
 
 # ======== FastAPI Google ========
 
-# def process_event_creation(message):
-#     chat_id = message.chat.id
-#     google_token = get_user_token(chat_id, "google_token")
-#
-#     try:
-#         parts = message.text.split(";")
-#         if len(parts) != 3:
-#             bot.send_message(
-#                 chat_id,
-#                 "Ошибка: Убедитесь, что вы ввели данные в формате 'Название события; Дата начала; Дата окончания'."
-#             )
-#             return
-#
-#         # Парсинг и преобразование данных
-#         summary = parts[0].strip()
-#         start_time = googleapi.parse_datetime_to_iso(parts[1].strip())
-#         end_time = googleapi.parse_datetime_to_iso(parts[2].strip())
-#
-#         # Создание события в Google Calendar
-#         event = googleapi.create_google_event(google_token, summary, start_time, end_time)
-#         bot.send_message(chat_id, f"Событие '{event['summary']}' успешно добавлено в Google Calendar.")
-#     except ValueError as ve:
-#         bot.send_message(chat_id, f"Ошибка: {str(ve)}")
-#     except Exception as e:
-#         bot.send_message(chat_id, f"Ошибка при создании события: {str(e)}")
-
 
 @bot.message_handler(commands=['list_events'])
 def list_events(message):
@@ -339,29 +316,120 @@ def process_event_deletion(message, events):
 
 YANDEX_API_URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
 
-def extract_event_details(text):
+# Константы
+FOLDER_ID = "b1gqhf0knkfj54l8590v"  # Ваш идентификатор каталога
+
+def form_payload(request_text):
     """
-    Sends text to Yandex LLM API to extract event information.
+    Формируем тело запроса к Yandex LLM API.
+    """
+    return json.dumps({
+        "modelUri": f"gpt://{FOLDER_ID}/yandexgpt-lite/latest",
+        "completionOptions": {
+            "stream": False,
+            "temperature": 0.2,
+            "maxTokens": 2000
+        },
+        "messages": [
+            {
+                "role": "system",
+                "text": "Ты - ассистент, который помогает планировать события. "
+                    "Анализируй запросы пользователя и возвращай следующую информацию: "
+                    "1. Название события, 2. Время начала события, 3. Время окончания события (если указано). "
+                    "Формат ответа: 'Событие: <название>. Начало: <дата (день) и время>. Конец: <дата и время>'."
+            },
+            {
+                "role": "user",
+                "text": request_text
+            }
+        ]
+    })
+
+def extract_event_details(request_text):
+    """
+    Отправляет запрос к Yandex LLM API для анализа текста.
     """
     headers = {
         "Authorization": f"Bearer {YANDEX_IAM_TOKEN}",
-        "Content-Type": "application/json",
+        "Content-Type": "application/json"
     }
-    data = {
-        "prompt": text,
-        "model": "general",
-        "temperature": 0.5,
-        "maxTokens": 150,
-        "topP": 1,
-        "stop": ["\n"]
-    }
-    response = requests.post(YANDEX_API_URL, headers=headers, json=data)
+    payload = form_payload(request_text)
+
+    response = requests.post(YANDEX_API_URL, headers=headers, data=payload)
 
     if response.status_code == 200:
-        return response.json()
-    else:
-        raise Exception(f"Ошибка при вызове Yandex LLM API: {response.text}")
+        result = response.json()
+        text = result['result']['alternatives'][0]['message']['text']
 
+        # Парсим текст ответа для извлечения данных
+        return parse_event_text(text)
+    else:
+        raise Exception(f"Ошибка при вызове Yandex LLM API: {response.status_code} {response.text}")
+
+def parse_event_text(text):
+    """
+    Парсинг текста от Yandex LLM для извлечения данных о событии.
+    """
+    # Пример текста: "Событие: маникюр. Начало: 2024-12-05T12:00. Конец: 2024-12-05T13:00."
+    print(text)
+    title_match = re.search(r"Событие: (.+?)\.", text)
+    start_time_match = re.search(r"Начало: (.+?)\.", text)
+    end_time_match = re.search(r"Конец: ([\d\-T:\+]+)", text)
+    print(start_time_match)
+
+    # Извлекаем данные
+    title = title_match.group(1) if title_match else "Неизвестное событие"
+    start_time = start_time_match.group(1) if start_time_match else None
+    end_time = end_time_match.group(1) if end_time_match else None
+
+    # Если дата не в ISO 8601, преобразуем
+    if start_time and not re.match(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", start_time):
+        start_time = convert_relative_to_iso(start_time)
+
+    if end_time and not re.match(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", end_time):
+        end_time = convert_relative_to_iso(end_time)
+
+    return {"title": title, "start_time": start_time, "end_time": end_time}
+
+def convert_relative_to_iso(time_str):
+    """
+    Преобразует относительные даты ("завтра", "в пятницу") в ISO 8601.
+    """
+    now = datetime.now()
+    print(time_str)
+
+    if "завтра" in time_str:
+        target_date = now + timedelta(days=1)
+    elif "понедельник" in time_str or "вторник" in time_str or "среда" in time_str or "четверг" in time_str or "пятница" in time_str or "суббота" in time_str or "воскресенье" in time_str:
+        target_date = now + timedelta(days=(7 - now.weekday()) % 7)
+    elif re.search(r"\d{1,2} (января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)", time_str):
+        month_map = {
+            "января": 1, "февраля": 2, "марта": 3, "апреля": 4, "мая": 5, "июня": 6,
+            "июля": 7, "августа": 8, "сентября": 9, "октября": 10, "ноября": 11, "декабря": 12
+        }
+        day, month = re.search(r"(\d{1,2}) (января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)", time_str).groups()
+        target_date = now.replace(day=int(day), month=month_map[month])
+    else:
+        raise ValueError(f"Не удалось распознать дату: {time_str}")
+
+    # Извлекаем время
+    time_match = re.search(r"\d{1,2}:\d{2}", time_str)
+    if time_match:
+        target_time = time_match.group()
+        target_datetime = datetime.strptime(f"{target_date.date()} {target_time}", "%Y-%m-%d %H:%M")
+    else:
+        target_datetime = target_date.replace(hour=0, minute=0)
+
+    return target_datetime.isoformat()
+
+
+# Пример вызова
+try:
+    user_request = "Напомни о встрече завтра в 15:00"
+    result = extract_event_details(user_request)
+    print("Ответ от Yandex LLM API:", result)
+except Exception as e:
+    print("Ошибка:", e)
 
 
 @bot.message_handler(commands=['add_event'])
@@ -385,6 +453,7 @@ def process_event_details_nlp(message):
     try:
         # Вызов Yandex LLM для анализа текста
         event_data = extract_event_details(user_input)
+        print(event_data)
 
         # Проверяем, удалось ли распознать событие
         if not event_data.get("title") or not event_data.get("start_time"):

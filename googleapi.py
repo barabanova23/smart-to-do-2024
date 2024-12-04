@@ -49,16 +49,18 @@ def delete_google_event(token, event_id):
     return True
 
 
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
-def parse_datetime_to_iso(date_time_str):
+def parse_datetime_to_iso(date_time_str, tz_offset_hours=3):
     """
     Преобразует дату и время из формата 'YYYY-MM-DD HH:MM' в ISO 8601 с временной зоной '+03:00'.
     """
-    try:
-        # Парсим строку в объект datetime
-        dt = datetime.strptime(date_time_str, "%Y-%m-%d %H:%M")
-        # Добавляем часовой пояс и возвращаем ISO 8601 формат
-        return dt.strftime("%Y-%m-%dT%H:%M:%S+03:00")
-    except ValueError:
-        raise ValueError("Некорректный формат даты. Используйте 'YYYY-MM-DD HH:MM'.")
+    dt = datetime.strptime(date_time_str, "%Y-%m-%dT%H:%M:%S")
+
+    # Добавляем временную зону
+    tz_offset = timedelta(hours=tz_offset_hours)
+    tz_info = timezone(tz_offset)
+    dt_with_tz = dt.replace(tzinfo=tz_info)
+
+    # Возвращаем строку в ISO 8601
+    return dt_with_tz.isoformat()
