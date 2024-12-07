@@ -125,10 +125,7 @@ def handle_google_token(message):
 
     if google_token:
         save_user_token(chat_id, "google_token", google_token)  # Сохраняем токен
-        bot.send_message(chat_id, '''Токен Google успешно сохранён!
-             Введите /add_event если хотите добавить событие
-             Введите /list_events если хотите увидеть список всех запланированных событий
-             Введите /delete_event если хотите удалить событие''')
+        bot.send_message(chat_id, '''Токен Google успешно сохранён!\nВведите /add_event если хотите добавить событие\nВведите /list_events если хотите увидеть список всех запланированных событий\nВведите /delete_event если хотите удалить событие''')
     else:
         bot.send_message(chat_id, "Не удалось сохранить токен Google. Попробуйте снова.")
 
@@ -139,7 +136,7 @@ def handle_todoist_token(message):
 
     if todoist_token:
         save_user_token(chat_id, "todoist_token", todoist_token)  # Сохраняем токен
-        bot.send_message(chat_id, "Токен Todoist успешно сохранён!")
+        bot.send_message(chat_id, "Токен Todoist успешно сохранён!\nВведите /add_task если хотите добавить событие\nВведите /list_tasks если хотите увидеть список всех запланированных событий\nВведите /delete_task если хотите удалить событие")
     else:
         bot.send_message(chat_id, "Не удалось сохранить токен Todoist. Попробуйте снова.")
 
@@ -172,6 +169,9 @@ async def todoist_callback(request: Request):
 # ======== FastAPI Todoist ========
 @bot.message_handler(commands=['add_task'])
 def add_task(message):
+    """
+    Основной обработчик для добавления задачи.
+    """
     chat_id = message.chat.id
     todoist_token = get_user_token(chat_id, "todoist_token")
     if not todoist_token:
@@ -179,7 +179,7 @@ def add_task(message):
         return
 
     projects = todoistapi.get_todoist_projects(todoist_token)
-    if not projects:
+    if not projects or "error" in projects:
         bot.send_message(chat_id, "Не удалось получить список проектов.")
         return
 
@@ -190,41 +190,160 @@ def add_task(message):
 
     bot.register_next_step_handler(message, process_project_selection, projects)
 
+
 def process_project_selection(message, projects):
+    """
+    Обработка выбора проекта.
+    """
     chat_id = message.chat.id
     try:
         selected_index = int(message.text.strip()) - 1
         if 0 <= selected_index < len(projects):
             selected_project_id = projects[selected_index]["id"]
-            bot.send_message(chat_id, "Введите задачу для добавления:")
+            bot.send_message(chat_id, "Введите описание задачи:")
             bot.register_next_step_handler(message, process_task_creation, selected_project_id)
         else:
             bot.send_message(chat_id, "Неверный выбор. Попробуйте снова.")
     except ValueError:
         bot.send_message(chat_id, "Неверный ввод. Укажите номер проекта.")
 
+
 def process_task_creation(message, project_id):
+    """
+    Обработка создания задачи.
+    """
     chat_id = message.chat.id
     todoist_token = get_user_token(chat_id, "todoist_token")
+    user_input = message.text.strip()
 
     try:
-        task_info = message.text.split(";")
-        task_content = task_info[0].strip()
-        due_string = task_info[1].strip() if len(task_info) > 1 else None
+        # Используем Yandex LLM для извлечения деталей задачи
+        print(user_input)
+        task_details = extract_event_details(user_input, True)
+        print(task_details)
+        task_name = task_details["title"]
+        due_string = task_details["start_time"]
 
-        task = todoistapi.create_task_in_project(todoist_token, task_content, project_id, due_string)
+        # Добавляем задачу в Todoist
+        task = todoistapi.create_task_in_project(todoist_token, task_name, project_id, due_string)
         if "error" not in task:
-            bot.send_message(chat_id, f"Задача '{task_content}' успешно добавлена в Todoist.")
+            bot.send_message(chat_id, f"Задача '{task_name}' успешно добавлена в проект.")
         else:
             bot.send_message(chat_id, f"Ошибка при создании задачи: {task['error']}")
     except Exception as e:
         bot.send_message(chat_id, f"Произошла ошибка: {str(e)}")
 
+def get_todoist_tasks(token):
+    """
+    Получает список всех задач из Todoist.
+    """
+    url = "https://api.todoist.com/rest/v2/tasks"
+    headers = {
+        "Authorization": f"Bearer {token}"
+    }
+    response = requests.get(url, headers=headers)
+
+    if response.status_code == 200:
+        return response.json()  # Возвращает список задач
+    else:
+        return {"error": response.text}  # Возвращает ошибку, если запрос не удался
+
+
+@bot.message_handler(commands=['list_tasks'])
+def list_tasks(message):
+    """
+    Обработчик команды /list_tasks для вывода списка задач.
+    """
+    chat_id = message.chat.id
+    todoist_token = get_user_token(chat_id, "todoist_token")
+
+    if not todoist_token:
+        bot.send_message(chat_id, "Вы не авторизованы в Todoist. Используйте /setup.")
+        return
+
+    tasks = get_todoist_tasks(todoist_token)
+    if "error" in tasks:
+        bot.send_message(chat_id, f"Ошибка при получении задач: {tasks['error']}")
+        return
+
+    if not tasks:
+        bot.send_message(chat_id, "У вас нет активных задач.")
+        return
+
+    response = "Список ваших задач:\n"
+    for idx, task in enumerate(tasks):
+        response += f"{idx + 1}. {task['content']} (ID: {task['id']})\n"
+    bot.send_message(chat_id, response)
+
+
+def delete_todoist_task(token, task_id):
+    """
+    Удаляет задачу в Todoist по её ID.
+    """
+    url = f"https://api.todoist.com/rest/v2/tasks/{task_id}"
+    headers = {
+        "Authorization": f"Bearer {token}"
+    }
+    response = requests.delete(url, headers=headers)
+
+    if response.status_code == 204:
+        return True  # Удаление успешно
+    else:
+        return {"error": response.text}  # Возвращает ошибку, если запрос не удался
+
+@bot.message_handler(commands=['delete_task'])
+def delete_task(message):
+    """
+    Обработчик команды /delete_task для удаления задачи.
+    """
+    chat_id = message.chat.id
+    todoist_token = get_user_token(chat_id, "todoist_token")
+
+    if not todoist_token:
+        bot.send_message(chat_id, "Вы не авторизованы в Todoist. Используйте /setup.")
+        return
+
+    tasks = get_todoist_tasks(todoist_token)
+    if "error" in tasks:
+        bot.send_message(chat_id, f"Ошибка при получении задач: {tasks['error']}")
+        return
+
+    if not tasks:
+        bot.send_message(chat_id, "У вас нет активных задач.")
+        return
+
+    response = "Выберите задачу для удаления:\n"
+    for idx, task in enumerate(tasks):
+        response += f"{idx + 1}. {task['content']} (ID: {task['id']})\n"
+    bot.send_message(chat_id, response)
+
+    bot.register_next_step_handler(message, process_task_deletion, tasks)
+
+
+def process_task_deletion(message, tasks):
+    """
+    Обработка удаления выбранной задачи.
+    """
+    chat_id = message.chat.id
+    todoist_token = get_user_token(chat_id, "todoist_token")
+
+    try:
+        selected_index = int(message.text.strip()) - 1
+        if 0 <= selected_index < len(tasks):
+            task_id = tasks[selected_index]["id"]
+            success = delete_todoist_task(todoist_token, task_id)
+            if success is True:
+                bot.send_message(chat_id, "Задача успешно удалена.")
+            else:
+                bot.send_message(chat_id, f"Ошибка при удалении задачи: {success['error']}")
+        else:
+            bot.send_message(chat_id, "Неверный выбор. Попробуйте снова.")
+    except ValueError:
+        bot.send_message(chat_id, "Неверный ввод. Укажите номер задачи.")
+
 
 
 # ======== FastAPI Google ========
-
-
 @bot.message_handler(commands=['list_events'])
 def list_events(message):
     chat_id = message.chat.id
@@ -273,7 +392,7 @@ def delete_event_start(message):
             event_list += f"{idx}. {event['summary']} ({start})\n"
 
         bot.send_message(chat_id, event_list)
-        bot.send_message(chat_id, "Напишите, например: 'Удали событие 2', чтобы удалить событие по номеру.")
+        bot.send_message(chat_id, "Напишите номер из списка, чтобы удалить событие по номеру.")
         bot.register_next_step_handler(message, process_event_deletion, events)
 
     except Exception as e:
@@ -289,23 +408,17 @@ def process_event_deletion(message, events):
 
     try:
         text = message.text.lower()
-        if not text.startswith("удали событие"):
-            bot.send_message(chat_id, "Неверный формат. Напишите, например: 'Удали событие 2'.")
-            return
-
-        # Получение номера события из текста
         parts = text.split()
-        if len(parts) != 3 or not parts[2].isdigit():
+        if len(parts) != 1 or not parts[0].isdigit():
             bot.send_message(chat_id,
-                             "Неверный формат. Убедитесь, что вы указали номер события, например: 'Удали событие 2'.")
+                             "Неверный формат. Убедитесь, что вы указали номер события, например: '2'.")
             return
 
-        event_index = int(parts[2]) - 1
+        event_index = int(parts[0]) - 1
         if event_index < 0 or event_index >= len(events):
             bot.send_message(chat_id, "Неверный номер события. Пожалуйста, выберите номер из списка.")
             return
 
-        # Получение ID события и удаление
         event_id = events[event_index]['id']
         googleapi.delete_google_event(google_token, event_id)
 
@@ -319,10 +432,33 @@ YANDEX_API_URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/completio
 # Константы
 FOLDER_ID = "b1gqhf0knkfj54l8590v"  # Ваш идентификатор каталога
 
-def form_payload(request_text):
+def form_payload(request_text, google_todoist):
     """
     Формируем тело запроса к Yandex LLM API.
     """
+    print(google_todoist)
+    if google_todoist:
+        return json.dumps({
+            "modelUri": f"gpt://{FOLDER_ID}/yandexgpt-lite/latest",
+            "completionOptions": {
+                "stream": False,
+                "temperature": 0.2,
+                "maxTokens": 2000
+            },
+            "messages": [
+                {
+                    "role": "system",
+                    "text": "Ты - ассистент, который помогает планировать события. "
+                            "Анализируй запросы пользователя и возвращай следующую информацию: "
+                            "1. Название события, 2. Время начала события, 3. Время окончания события (если указано). "
+                            "Формат ответа: 'Событие: <название>. Начало: <дата (день) и время>. Конец: <дата (день) и время>'."
+                },
+                {
+                    "role": "user",
+                    "text": request_text
+                }
+            ]
+        })
     return json.dumps({
         "modelUri": f"gpt://{FOLDER_ID}/yandexgpt-lite/latest",
         "completionOptions": {
@@ -333,10 +469,10 @@ def form_payload(request_text):
         "messages": [
             {
                 "role": "system",
-                "text": "Ты - ассистент, который помогает планировать события. "
-                    "Анализируй запросы пользователя и возвращай следующую информацию: "
-                    "1. Название события, 2. Время начала события, 3. Время окончания события (если указано). "
-                    "Формат ответа: 'Событие: <название>. Начало: <дата (день) и время>. Конец: <дата и время>'."
+                "text": "Ты - ассистент, который помогает планировать задачи. "
+                        "Анализируй запросы пользователя и возвращай следующую информацию: "
+                        "1. Название задачи, 2. Дата и время задачи (если указано), 3. Время окончания задачи (если указано). "
+                        "Формат ответа: 'Задача: <название>. Начало: <дата (день) и время>. Конец: <дата (день) и время>'."
             },
             {
                 "role": "user",
@@ -345,7 +481,7 @@ def form_payload(request_text):
         ]
     })
 
-def extract_event_details(request_text):
+def extract_event_details(request_text, google_todoist):
     """
     Отправляет запрос к Yandex LLM API для анализа текста.
     """
@@ -353,13 +489,13 @@ def extract_event_details(request_text):
         "Authorization": f"Bearer {YANDEX_IAM_TOKEN}",
         "Content-Type": "application/json"
     }
-    payload = form_payload(request_text)
-
+    payload = form_payload(request_text, google_todoist)
     response = requests.post(YANDEX_API_URL, headers=headers, data=payload)
 
     if response.status_code == 200:
         result = response.json()
         text = result['result']['alternatives'][0]['message']['text']
+        print(text)
 
         # Парсим текст ответа для извлечения данных
         return parse_event_text(text)
@@ -373,46 +509,67 @@ def parse_event_text(text):
     # Пример текста: "Событие: маникюр. Начало: 2024-12-05T12:00. Конец: 2024-12-05T13:00."
     print(text)
     title_match = re.search(r"Событие: (.+?)\.", text)
-    start_time_match = re.search(r"Начало: (.+?)\.", text)
+    start_time_match = re.search(r"Начало: (.+?)\К", text)
     end_time_match = re.search(r"Конец: ([\d\-T:\+]+)", text)
     print(start_time_match)
-
     # Извлекаем данные
     title = title_match.group(1) if title_match else "Неизвестное событие"
     start_time = start_time_match.group(1) if start_time_match else None
     end_time = end_time_match.group(1) if end_time_match else None
-
     # Если дата не в ISO 8601, преобразуем
     if start_time and not re.match(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", start_time):
         start_time = convert_relative_to_iso(start_time)
-
     if end_time and not re.match(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", end_time):
         end_time = convert_relative_to_iso(end_time)
-
     return {"title": title, "start_time": start_time, "end_time": end_time}
 
 def convert_relative_to_iso(time_str):
-    """
-    Преобразует относительные даты ("завтра", "в пятницу") в ISO 8601.
-    """
     now = datetime.now()
-    print(time_str)
+    print("Преобразуем строку:", time_str)
 
+    # Обработка ключевых слов
     if "завтра" in time_str:
         target_date = now + timedelta(days=1)
-    elif "понедельник" in time_str or "вторник" in time_str or "среда" in time_str or "четверг" in time_str or "пятница" in time_str or "суббота" in time_str or "воскресенье" in time_str:
-        target_date = now + timedelta(days=(7 - now.weekday()) % 7)
+    elif "послезавтра" in time_str:
+        target_date = now + timedelta(days=2)
+    elif "сегодня" in time_str:
+        target_date = now
+    elif re.search(r"(понедельник|вторник|среда|четверг|пятница|суббота|воскресенье)", time_str):
+        weekdays = {
+            "понедельник": 0, "вторник": 1, "среда": 2, "четверг": 3,
+            "пятница": 4, "суббота": 5, "воскресенье": 6
+        }
+        weekday_name = re.search(r"(понедельник|вторник|среда|четверг|пятница|суббота|воскресенье)", time_str).group(1)
+        target_weekday = weekdays[weekday_name]
+        current_weekday = now.weekday()
+
+        # Рассчитываем, сколько дней вперед до нужного дня недели
+        days_ahead = (target_weekday - current_weekday + 7) % 7
+        if days_ahead == 0:  # Если указанный день - это сегодня
+            days_ahead = 7
+        target_date = now + timedelta(days=days_ahead)
     elif re.search(r"\d{1,2} (января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)", time_str):
+        # Обработка формата "14 декабря"
         month_map = {
             "января": 1, "февраля": 2, "марта": 3, "апреля": 4, "мая": 5, "июня": 6,
             "июля": 7, "августа": 8, "сентября": 9, "октября": 10, "ноября": 11, "декабря": 12
         }
-        day, month = re.search(r"(\d{1,2}) (января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)", time_str).groups()
-        target_date = now.replace(day=int(day), month=month_map[month])
+        day, month_name = re.search(r"(\d{1,2}) (января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)", time_str).groups()
+        month = month_map[month_name]
+        target_date = now.replace(day=int(day), month=month, hour=0, minute=0, second=0, microsecond=0)
+    elif re.match(r"\d{1,2}\.\d{1,2}\.\d{4}", time_str):
+        # Обработка формата "14.12.2024"
+        data = time_str.split(",")
+        if len(data) == 1:
+            data = time_str.split(" ")
+        day, month, year = map(int, data[0].split("."))
+        hour, minute = map(int, data[1].split(":"))
+        dt = datetime(year, month, day, hour, minute)
+        return dt.isoformat()
     else:
         raise ValueError(f"Не удалось распознать дату: {time_str}")
 
-    # Извлекаем время
+    # Извлекаем время из строки, если указано
     time_match = re.search(r"\d{1,2}:\d{2}", time_str)
     if time_match:
         target_time = time_match.group()
@@ -423,10 +580,9 @@ def convert_relative_to_iso(time_str):
     return target_datetime.isoformat()
 
 
-# Пример вызова
 try:
-    user_request = "Напомни о встрече завтра в 15:00"
-    result = extract_event_details(user_request)
+    user_request = "в понедельник у меня встреча с другом в 19.30"
+    result = extract_event_details(user_request, True)
     print("Ответ от Yandex LLM API:", result)
 except Exception as e:
     print("Ошибка:", e)
@@ -452,7 +608,7 @@ def process_event_details_nlp(message):
 
     try:
         # Вызов Yandex LLM для анализа текста
-        event_data = extract_event_details(user_input)
+        event_data = extract_event_details(user_input, True)
         print(event_data)
 
         # Проверяем, удалось ли распознать событие
