@@ -1,18 +1,16 @@
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+from datetime import datetime, timezone, timedelta
+
 
 def get_google_service(token):
-    """
-    Создает объект сервиса Google Calendar.
-    """
+    """Создает объект сервиса Google Calendar."""
     credentials = Credentials(token)
     service = build('calendar', 'v3', credentials=credentials)
     return service
 
+
 def create_google_event(token, summary, start_time, end_time):
-    """
-    Создает событие в Google Calendar.
-    """
     service = get_google_service(token)
     event = {
         'summary': summary,
@@ -26,12 +24,10 @@ def create_google_event(token, summary, start_time, end_time):
     event_result = service.events().insert(calendarId='primary', body=event).execute()
     return event_result
 
+
 def list_google_events(token):
-    """
-    Получает список ближайших событий из Google Calendar.
-    """
     service = get_google_service(token)
-    now = datetime.utcnow().isoformat() + 'Z'  # Текущее время в формате ISO 8601
+    now = datetime.utcnow().isoformat() + 'Z'
     events_result = service.events().list(
         calendarId='primary', timeMin=now,
         maxResults=10, singleEvents=True,
@@ -40,27 +36,18 @@ def list_google_events(token):
     events = events_result.get('items', [])
     return events
 
+
 def delete_google_event(token, event_id):
-    """
-    Удаляет событие из Google Calendar по ID.
-    """
     service = get_google_service(token)
     service.events().delete(calendarId='primary', eventId=event_id).execute()
     return True
 
 
-from datetime import datetime, timezone, timedelta
-
-def parse_datetime_to_iso(date_time_str, tz_offset_hours=3):
-    """
-    Преобразует дату и время из формата 'YYYY-MM-DD HH:MM' в ISO 8601 с временной зоной '+03:00'.
-    """
+def parse_datetime_to_iso(date_time_str, tz_offset_hours=0):
     dt = datetime.strptime(date_time_str, "%Y-%m-%dT%H:%M:%S")
 
-    # Добавляем временную зону
     tz_offset = timedelta(hours=tz_offset_hours)
     tz_info = timezone(tz_offset)
     dt_with_tz = dt.replace(tzinfo=tz_info)
 
-    # Возвращаем строку в ISO 8601
     return dt_with_tz.isoformat()

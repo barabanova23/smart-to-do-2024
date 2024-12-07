@@ -1,0 +1,9 @@
+fastapi==0.115.5
+pyTelegramBotAPI==4.12.0
+google-auth==2.23.0
+requests==2.31.0
+pytest==8.3.3
+yandexcloud==0.91.0
+uvicorn==0.32.1
+config==0.5.1
+google==3.0.0
