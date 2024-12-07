@@ -23,6 +23,7 @@
 3. **Уведомления**:
    - Отправка напоминаний через Telegram.
 
+---
 
 ## Примерный сценарий взаимодействия
 
@@ -44,11 +45,23 @@
 ## Команды и пользовательский интерфейс
 
 Бот — это простой чат-интерфейс с минимальным набором команд:
+
 - **`/start`** — инструкция по настройке бота.
 - **`/setup`** — настройка доступа к Google Calendar и Todoist.
 - **`/help`** — справка по формулировкам и функционалу.
+- **`/add_task`** — добавить задачу в Todoist.
+- **`/add_event`** — добавить событие в Google Calendar.
+- **`/delete_task`** — удалить задачу из Todoist.
+- **`/delete_event`** — удалить событие из Google Calendar.
+- **`/list_tasks`** — показать список задач из Todoist.
+- **`/list_events`** — показать список событий из Google Calendar.
 - **Неформальные сообщения** — добавление задач и событий.
 
+<a href="https://ibb.co/g7dR7cT"><img src="https://i.ibb.co/KGDrG8q/start.png" alt="start" border="0"></a>
+
+<a href="https://ibb.co/c1QsWV8"><img src="https://i.ibb.co/R9cJXd6/google.png" alt="google" border="0"></a>
+
+<a href="https://ibb.co/KsjWJ8N"><img src="https://i.ibb.co/fNYHsT8/todoist.png" alt="todoist" border="0"></a>
 
 ## Структура проекта
 
@@ -93,12 +106,3 @@
 
 **Ответ бота**:  
 *Событие добавлено в Google Calendar: «Встреча с друзьями» в пятницу, 20:00.*
-
-
-## Требования
-
-- Python 3.10+
-- Telegram Bot API
-- YandexGPT GPT API
-- Google Calendar API
-- Todoist API
