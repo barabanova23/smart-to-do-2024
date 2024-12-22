@@ -1,4 +1,4 @@
-from config import FOLDER_ID
+from src.project.config import FOLDER_ID
 
 DATE_R = r"\d{1,2}\.\d{1,2}\.\d{4}"
 DAYS_IN_WEEK = 7

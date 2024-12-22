@@ -1,7 +1,7 @@
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 import pytest
 from fastapi.testclient import TestClient
-from bot import app, save_user_token, get_user_token, generate_google_auth_url, \
+from src.project.bot import app, save_user_token, get_user_token, generate_google_auth_url, \
     generate_todoist_auth_url, convert_relative_to_iso
 
 client = TestClient(app)

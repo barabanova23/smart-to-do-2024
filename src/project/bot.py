@@ -1,7 +1,6 @@
-from datetime import datetime, timezone, timedelta
-import googleapi
+from datetime import datetime, timedelta
+from src.project.api import googleapi, todoistapi
 import telebot
-import todoistapi
 import urllib.parse
 import re
 import requests
@@ -10,7 +9,7 @@ import threading
 import uvicorn
 import json
 import signal
-from config import BOT_TOKEN, REDIRECT_URI, GOOGLE_CLIENT_ID, TODOIST_CLIENT_ID, GOOGLE_CLIENT_SECRET, TODOIST_CLIENT_SECRET, YANDEX_IAM_TOKEN, FOLDER_ID
+from config import BOT_TOKEN, REDIRECT_URI, GOOGLE_CLIENT_ID, TODOIST_CLIENT_ID, GOOGLE_CLIENT_SECRET, TODOIST_CLIENT_SECRET, YANDEX_IAM_TOKEN
 
 from const import (
     HTTP_OK,
@@ -34,6 +33,7 @@ bot = telebot.TeleBot(BOT_TOKEN)
 user_data = {}
 app = FastAPI()
 
+
 # ======== Вспомогательные функции для подключения ========
 def save_user_token(chat_id, key, token):
     if chat_id not in user_data:
@@ -43,6 +43,7 @@ def save_user_token(chat_id, key, token):
 
 def get_user_token(chat_id, key):
     return user_data.get(chat_id, {}).get(key)
+
 
 def generate_google_auth_url():
     """Генерирует ссылку авторизации Google."""
@@ -105,8 +106,29 @@ def start(message):
         "   - 'Поставь встречу с коллегами завтра в 15:00'\n"
         "   - 'Напомни позвонить врачу до 28 декабря'\n\n"
         "📌 Для настройки доступа к Google Calendar и Todoist используй команду /setup.\n"
+        "ℹ️ Для справки по использованию напиши /help."
     )
     bot.send_message(message.chat.id, welcome_message)
+
+
+@bot.message_handler(commands=['help'])
+def help_command(message):
+    help_message = (
+        "🔹 Доступные команды:\n\n"
+        "/start — Приветственное сообщение и информация о боте.\n"
+        "/setup — Настройка доступа к Google Calendar и Todoist.\n"
+        "/add_event — Добавить событие в Google Calendar.\n"
+        "/list_events — Показать список запланированных событий.\n"
+        "/delete_event — Удалить событие из Google Calendar.\n"
+        "/add_task — Добавить задачу в Todoist.\n"
+        "/list_tasks — Показать список задач из Todoist.\n"
+        "/delete_task — Удалить задачу из Todoist.\n\n"
+        "💡 Пример использования:\n"
+        "- 'Встречаюсь с коллегами завтра в 15:00' — Событие 'встреча с коллегами' успешно добавлено в Google Calendar.\n"
+        "- 'Напомни про свидание завтра в семь вечера' — Задача 'свидание' успешно добавлена в проект.\n\n"
+        "Для корректной работы авторизуйтесь с помощью команды /setup."
+    )
+    bot.send_message(message.chat.id, help_message)
 
 
 @bot.message_handler(commands=['setup'])
@@ -147,7 +169,6 @@ def handle_todoist_token(message):
         bot.send_message(chat_id, "Токен Todoist успешно сохранён!\nВведите /add_task если хотите добавить событие\nВведите /list_tasks если хотите увидеть список всех запланированных событий\nВведите /delete_task если хотите удалить событие")
     else:
         bot.send_message(chat_id, "Не удалось сохранить токен Todoist. Попробуйте снова.")
-
 
 
 # ======== FastAPI Колбэки ========
@@ -381,6 +402,7 @@ def list_events(message):
     except Exception as e:
         bot.send_message(chat_id, f"Ошибка при получении событий: {str(e)}")
 
+
 @bot.message_handler(commands=['delete_event'])
 def delete_event_start(message):
     """Удаление события. Список событий для удаления."""
@@ -510,6 +532,7 @@ def parse_event_text(text):
         end_time = convert_relative_to_iso(end_time)
     return {"title": title, "start_time": start_time, "end_time": end_time}
 
+
 def convert_relative_to_iso(time_str):
     now = datetime.now()
     print(f"Original time string: {time_str}")
@@ -604,7 +627,6 @@ def process_event_details_nlp(message):
 
 
 # ======== Запуск сервера и бота ========
-
 def start_fastapi():
     uvicorn.run(app, host="0.0.0.0", port=8000)
 
@@ -617,10 +639,12 @@ if __name__ == "__main__":
     threading.Thread(target=start_fastapi).start()
     threading.Thread(target=start_telegram_bot).start()
 
+
 def handle_exit(signum, frame):
     bot.stop_polling()
     print("Завершение работы приложения...")
     exit(0)
+
 
 signal.signal(signal.SIGINT, handle_exit)
 signal.signal(signal.SIGTERM, handle_exit)
