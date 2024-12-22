@@ -198,7 +198,7 @@ def add_task(message):
 
 
 def process_project_selection(message, projects):
-    """ Обработка выбора проекта. """
+    """ Обработка выбора проекта в Todoist. """
     chat_id = message.chat.id
     try:
         selected_index = int(message.text.strip()) - 1
@@ -264,13 +264,14 @@ def list_tasks(message):
     if not tasks:
         bot.send_message(chat_id, "У вас нет активных задач.")
         return
-
     response = "Список ваших задач:\n"
     for idx, task in enumerate(tasks):
-        due_date = task.get('due', {}).get('date')
+        print(task)
+        due_date = task.get('due', {}).get('string')
+        print(due_date)
         if due_date:
             parsed_date = datetime.fromisoformat(due_date)
-            formatted_date = parsed_date.strftime("%d %B %Y года %H:%M")
+            formatted_date = parsed_date.strftime("%d %B %Y year %H:%M")
             response += f"{idx + 1}. {task['content']} (дата: {formatted_date})\n"
         else:
             response += f"{idx + 1}. {task['content']}\n"
@@ -278,7 +279,7 @@ def list_tasks(message):
 
 
 def delete_todoist_task(token, task_id):
-    """Удаление задачу."""
+    """Удаление задачи."""
     url = f"https://api.todoist.com/rest/v2/tasks/{task_id}"
     headers = {
         "Authorization": f"Bearer {token}"
@@ -332,7 +333,7 @@ def delete_task(message):
 
     response = "Выберите задачу для удаления:\n"
     for idx, task in enumerate(tasks):
-        due_date = task.get('due', {}).get('date')
+        due_date = task.get('due', {}).get('string')
         if due_date:
             parsed_date = datetime.fromisoformat(due_date)
             formatted_date = parsed_date.strftime("%d %B %Y года %H:%M")
