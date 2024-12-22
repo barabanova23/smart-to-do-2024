@@ -11,6 +11,23 @@ import uvicorn
 import json
 from config import BOT_TOKEN, REDIRECT_URI, GOOGLE_CLIENT_ID, TODOIST_CLIENT_ID, GOOGLE_CLIENT_SECRET, TODOIST_CLIENT_SECRET, YANDEX_IAM_TOKEN, FOLDER_ID
 
+from const import (
+    HTTP_OK,
+    HTTP_NO_CONTENT,
+    MODEL_URI,
+    DEFAULT_COMPLETION_OPTIONS,
+    SYSTEM_MESSAGE_GOOGLE,
+    SYSTEM_MESSAGE_TODOIST,
+    DELTA_TOMORROW,
+    DELTA_AFTER_TOMORROW,
+    WEEKDAY_R,
+    DAYS_IN_WEEK,
+    MONTH_R,
+    DATE_R,
+    TIME_R
+)
+
+
 bot = telebot.TeleBot(BOT_TOKEN)
 user_data = {}
 app = FastAPI()
@@ -223,7 +240,7 @@ def get_todoist_tasks(token):
     }
     response = requests.get(url, headers=headers)
 
-    if response.status_code == 200:
+    if response.status_code == HTTP_OK:
         return response.json()
     else:
         return {"error": response.text}
@@ -262,7 +279,7 @@ def delete_todoist_task(token, task_id):
     }
     response = requests.delete(url, headers=headers)
 
-    if response.status_code == 204:
+    if response.status_code == HTTP_NO_CONTENT:
         return True
     else:
         return {"error": response.text}
@@ -415,20 +432,12 @@ def form_payload(request_text, google_todoist):
     """Формируем тело запроса к Yandex LLM API."""
     if google_todoist:
         return json.dumps({
-            "modelUri": f"gpt://{FOLDER_ID}/yandexgpt-lite/latest",
-            "completionOptions": {
-                "stream": False,
-                "temperature": 0.2,
-                "maxTokens": 2000
-            },
+            "modelUri": MODEL_URI,
+            "completionOptions": DEFAULT_COMPLETION_OPTIONS,
             "messages": [
                 {
                     "role": "system",
-                    "text": "Ты - ассистент, который помогает планировать события. "
-                            "Анализируй запросы пользователя и возвращай следующую информацию: "
-                            "1. Название события, 2. Время начала события, 3. Время окончания события (если указано). "
-                            "Формат ответа: 'Событие: <название>. Начало: <дата (день) и время>. Конец: <дата (день) и время>'."
-                            "'Послезавтра' обрабатывай как дату, которая будет послезавтра"
+                    "text": SYSTEM_MESSAGE_GOOGLE
                 },
                 {
                     "role": "user",
@@ -437,20 +446,12 @@ def form_payload(request_text, google_todoist):
             ]
         })
     return json.dumps({
-        "modelUri": f"gpt://{FOLDER_ID}/yandexgpt-lite/latest",
-        "completionOptions": {
-            "stream": False,
-            "temperature": 0.2,
-            "maxTokens": 2000
-        },
+        "modelUri": MODEL_URI,
+        "completionOptions": DEFAULT_COMPLETION_OPTIONS,
         "messages": [
             {
                 "role": "system",
-                "text": "Ты - ассистент, который помогает планировать задачи. "
-                        "Анализируй запросы пользователя и возвращай следующую информацию: "
-                        "1. Название задачи, 2. Дата и время задачи (если указано), 3. Время окончания задачи (если указано). "
-                        "Формат ответа: 'Задача: <название>. Начало: <дата (день) и время>. Конец: <дата (день) и время>'."
-                        "'Послезавтра' обрабатывай как дату, которая будет послезавтра"
+                "text": SYSTEM_MESSAGE_TODOIST
             },
             {
                 "role": "user",
@@ -495,39 +496,38 @@ def parse_event_text(text):
         end_time = convert_relative_to_iso(end_time)
     return {"title": title, "start_time": start_time, "end_time": end_time}
 
-
 def convert_relative_to_iso(time_str):
     now = datetime.now()
     if time_str[-1] == '.':
         time_str = time_str[:-2]
     if "послезавтра" in time_str:
-        target_date = now + timedelta(days=2)
+        target_date = now + timedelta(days=DELTA_AFTER_TOMORROW)
     elif "завтра" in time_str:
-        target_date = now + timedelta(days=1)
+        target_date = now + timedelta(days=DELTA_TOMORROW)
     elif "сегодня" in time_str:
         target_date = now
-    elif re.search(r"(понедельник|вторник|среда|четверг|пятница|суббота|воскресенье)", time_str):
+    elif re.search(WEEKDAY_R, time_str):
         weekdays = {
             "понедельник": 0, "вторник": 1, "среда": 2, "четверг": 3,
             "пятница": 4, "суббота": 5, "воскресенье": 6
         }
-        weekday_name = re.search(r"(понедельник|вторник|среда|четверг|пятница|суббота|воскресенье)", time_str).group(1)
+        weekday_name = re.search(WEEKDAY_R, time_str).group(1)
         target_weekday = weekdays[weekday_name]
         current_weekday = now.weekday()
 
         days_ahead = (target_weekday - current_weekday + 7) % 7
         if days_ahead == 0:
-            days_ahead = 7
+            days_ahead = DAYS_IN_WEEK
         target_date = now + timedelta(days=days_ahead)
-    elif re.search(r"\d{1,2} (января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)", time_str):
+    elif re.search(MONTH_R, time_str):
         month_map = {
             "января": 1, "февраля": 2, "марта": 3, "апреля": 4, "мая": 5, "июня": 6,
             "июля": 7, "августа": 8, "сентября": 9, "октября": 10, "ноября": 11, "декабря": 12
         }
-        day, month_name = re.search(r"(\d{1,2}) (января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)", time_str).groups()
+        day, month_name = re.search(MONTH_R, time_str).groups()
         month = month_map[month_name]
         target_date = now.replace(day=int(day), month=month, hour=0, minute=0, second=0, microsecond=0)
-    elif re.match(r"\d{1,2}\.\d{1,2}\.\d{4}", time_str):
+    elif re.match(DATE_R, time_str):
         data = time_str.split(",")
         if len(data) == 1:
             data = time_str.split(" ")
@@ -538,7 +538,7 @@ def convert_relative_to_iso(time_str):
     else:
         raise ValueError(f"Не удалось распознать дату: {time_str}")
 
-    time_match = re.search(r"\d{1,2}:\d{2}", time_str)
+    time_match = re.search(TIME_R, time_str)
     if time_match:
         target_time = time_match.group()
         target_datetime = datetime.strptime(f"{target_date.date()} {target_time}", "%Y-%m-%d %H:%M")
