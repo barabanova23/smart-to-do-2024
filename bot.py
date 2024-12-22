@@ -484,7 +484,7 @@ def parse_event_text(text):
     print(text)
     title_match = re.search(r"(?:Событие:|Задача:) (.+?)\.", text)
     start_time_match = re.search(r"Начало: (.+?)\К", text)
-    end_time_match = re.search(r"Конец: ([\d\-T:\+]+)", text)
+    end_time_match = re.search(r"Конец: (.*)", text)
 
     title = title_match.group(1) if title_match else "Неизвестное событие"
     start_time = start_time_match.group(1) if start_time_match else None
@@ -498,8 +498,8 @@ def parse_event_text(text):
 
 def convert_relative_to_iso(time_str):
     now = datetime.now()
-    if time_str[-1] == '.':
-        time_str = time_str[:-2]
+    if "не указан" in time_str:
+        return None
     if "послезавтра" in time_str:
         target_date = now + timedelta(days=DELTA_AFTER_TOMORROW)
     elif "завтра" in time_str:
