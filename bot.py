@@ -9,6 +9,7 @@ from fastapi import FastAPI, Request
 import threading
 import uvicorn
 import json
+import signal
 from config import BOT_TOKEN, REDIRECT_URI, GOOGLE_CLIENT_ID, TODOIST_CLIENT_ID, GOOGLE_CLIENT_SECRET, TODOIST_CLIENT_SECRET, YANDEX_IAM_TOKEN, FOLDER_ID
 
 from const import (
@@ -24,6 +25,7 @@ from const import (
     DAYS_IN_WEEK,
     MONTH_R,
     DATE_R,
+    MONTH_MAP,
     TIME_R
 )
 
@@ -149,8 +151,6 @@ def handle_todoist_token(message):
 
 
 # ======== FastAPI Колбэки ========
-
-
 @app.get("/callback/google")
 async def google_callback(request: Request):
     """Обрабатывает колбэк от Google."""
@@ -267,7 +267,13 @@ def list_tasks(message):
 
     response = "Список ваших задач:\n"
     for idx, task in enumerate(tasks):
-        response += f"{idx + 1}. {task['content']} (ID: {task['id']})\n"
+        due_date = task.get('due', {}).get('date')
+        if due_date:
+            parsed_date = datetime.fromisoformat(due_date)
+            formatted_date = parsed_date.strftime("%d %B %Y года %H:%M")
+            response += f"{idx + 1}. {task['content']} (дата: {formatted_date})\n"
+        else:
+            response += f"{idx + 1}. {task['content']}\n"
     bot.send_message(chat_id, response)
 
 
@@ -326,7 +332,13 @@ def delete_task(message):
 
     response = "Выберите задачу для удаления:\n"
     for idx, task in enumerate(tasks):
-        response += f"{idx + 1}. {task['content']} (ID: {task['id']})\n"
+        due_date = task.get('due', {}).get('date')
+        if due_date:
+            parsed_date = datetime.fromisoformat(due_date)
+            formatted_date = parsed_date.strftime("%d %B %Y года %H:%M")
+            response += f"{idx + 1}. {task['content']} (дата: {formatted_date})\n"
+        else:
+            response += f"{idx + 1}. {task['content']}\n"
     bot.send_message(chat_id, response)
 
     bot.register_next_step_handler(message, process_task_deletion, tasks)
@@ -350,11 +362,9 @@ def add_event(message):
 def list_events(message):
     chat_id = message.chat.id
     google_token = get_user_token(chat_id, "google_token")
-
     if not google_token:
         bot.send_message(chat_id, "Вы не авторизованы в Google. Используйте /setup.")
         return
-
     try:
         events = googleapi.list_google_events(google_token)
         if not events:
@@ -363,11 +373,12 @@ def list_events(message):
             response = "Ваши ближайшие события:\n"
             for event in events:
                 start = event['start'].get('dateTime', event['start'].get('date'))
-                response += f"- {event['summary']} ({start})\n"
+                parsed_date = datetime.fromisoformat(start)
+                formatted_date = parsed_date.strftime("%d %B %Y года %H:%M")
+                response += f"- {event['summary']} ({formatted_date})\n"
             bot.send_message(chat_id, response)
     except Exception as e:
         bot.send_message(chat_id, f"Ошибка при получении событий: {str(e)}")
-
 
 @bot.message_handler(commands=['delete_event'])
 def delete_event_start(message):
@@ -388,7 +399,9 @@ def delete_event_start(message):
         event_list = "Ваши ближайшие события:\n"
         for idx, event in enumerate(events, start=1):
             start = event['start'].get('dateTime', event['start'].get('date'))
-            event_list += f"{idx}. {event['summary']} ({start})\n"
+            parsed_date = datetime.fromisoformat(start)
+            formatted_date = parsed_date.strftime("%d %B %Y года %H:%M")
+            event_list += f"{idx}. {event['summary']} ({formatted_date})\n"
 
         bot.send_message(chat_id, event_list)
         bot.send_message(chat_id, "Напишите номер из списка, чтобы удалить событие по номеру.")
@@ -498,8 +511,11 @@ def parse_event_text(text):
 
 def convert_relative_to_iso(time_str):
     now = datetime.now()
+    print(f"Original time string: {time_str}")
+
     if "не указан" in time_str:
         return None
+
     if "послезавтра" in time_str:
         target_date = now + timedelta(days=DELTA_AFTER_TOMORROW)
     elif "завтра" in time_str:
@@ -515,29 +531,38 @@ def convert_relative_to_iso(time_str):
         target_weekday = weekdays[weekday_name]
         current_weekday = now.weekday()
 
-        days_ahead = (target_weekday - current_weekday + 7) % 7
+        days_ahead = (target_weekday - current_weekday + DAYS_IN_WEEK) % DAYS_IN_WEEK
         if days_ahead == 0:
             days_ahead = DAYS_IN_WEEK
         target_date = now + timedelta(days=days_ahead)
     elif re.search(MONTH_R, time_str):
-        month_map = {
-            "января": 1, "февраля": 2, "марта": 3, "апреля": 4, "мая": 5, "июня": 6,
-            "июля": 7, "августа": 8, "сентября": 9, "октября": 10, "ноября": 11, "декабря": 12
-        }
-        day, month_name = re.search(MONTH_R, time_str).groups()
-        month = month_map[month_name]
-        target_date = now.replace(day=int(day), month=month, hour=0, minute=0, second=0, microsecond=0)
+        match = re.search(MONTH_R, time_str)
+        day, month_name = match.groups()
+        month = MONTH_MAP[month_name]
+        year_match = re.search(r"\d{4} года", time_str)
+        if year_match:
+            year = int(year_match.group().split()[0])
+        else:
+            if not (month == 12 and 23 <= int(day) <= 31):
+                year = now.year + 1
+            else:
+                year = now.year
+
+        target_date = datetime(year, month, int(day), 0, 0, 0)
     elif re.match(DATE_R, time_str):
-        data = time_str.split(",")
-        if len(data) == 1:
-            data = time_str.split(" ")
-        day, month, year = map(int, data[0].split("."))
-        hour, minute = map(int, data[1].split(":"))
-        dt = datetime(year, month, day, hour, minute)
-        return dt.isoformat()
+        try:
+            data = time_str.split(",") if "," in time_str else time_str.split(" ")
+            day, month, year = map(int, data[0].split("."))
+            if len(data) > 1 and re.match(TIME_R, data[1].strip()):
+                hour, minute = map(int, data[1].strip().split(":"))
+            else:
+                hour, minute = 0, 0
+            dt = datetime(year, month, day, hour, minute)
+            return dt.replace(microsecond=0).isoformat()
+        except ValueError as e:
+            raise ValueError(f"Ошибка обработки времени: {time_str}. Причина: {e}")
     else:
         raise ValueError(f"Не удалось распознать дату: {time_str}")
-
     time_match = re.search(TIME_R, time_str)
     if time_match:
         target_time = time_match.group()
@@ -545,7 +570,10 @@ def convert_relative_to_iso(time_str):
     else:
         target_datetime = target_date.replace(hour=0, minute=0)
 
+    print(f"Processed datetime: {target_datetime.replace(microsecond=0).isoformat()}")
     return target_datetime.replace(microsecond=0).isoformat()
+
+
 
 def process_event_details_nlp(message):
     chat_id = message.chat.id
@@ -587,8 +615,6 @@ def start_telegram_bot():
 if __name__ == "__main__":
     threading.Thread(target=start_fastapi).start()
     threading.Thread(target=start_telegram_bot).start()
-
-import signal
 
 def handle_exit(signum, frame):
     bot.stop_polling()
