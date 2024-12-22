@@ -25,7 +25,6 @@ def save_user_token(chat_id, key, token):
 def get_user_token(chat_id, key):
     return user_data.get(chat_id, {}).get(key)
 
-
 def generate_google_auth_url():
     """Генерирует ссылку авторизации Google."""
     base_url = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -133,6 +132,8 @@ def handle_todoist_token(message):
 
 
 # ======== FastAPI Колбэки ========
+
+
 @app.get("/callback/google")
 async def google_callback(request: Request):
     """Обрабатывает колбэк от Google."""
@@ -427,6 +428,7 @@ def form_payload(request_text, google_todoist):
                             "Анализируй запросы пользователя и возвращай следующую информацию: "
                             "1. Название события, 2. Время начала события, 3. Время окончания события (если указано). "
                             "Формат ответа: 'Событие: <название>. Начало: <дата (день) и время>. Конец: <дата (день) и время>'."
+                            "'Послезавтра' обрабатывай как дату, которая будет послезавтра"
                 },
                 {
                     "role": "user",
@@ -448,6 +450,7 @@ def form_payload(request_text, google_todoist):
                         "Анализируй запросы пользователя и возвращай следующую информацию: "
                         "1. Название задачи, 2. Дата и время задачи (если указано), 3. Время окончания задачи (если указано). "
                         "Формат ответа: 'Задача: <название>. Начало: <дата (день) и время>. Конец: <дата (день) и время>'."
+                        "'Послезавтра' обрабатывай как дату, которая будет послезавтра"
             },
             {
                 "role": "user",
@@ -477,6 +480,7 @@ def extract_event_details(request_text, google_todoist):
 
 def parse_event_text(text):
     """Парсинг текста от Yandex LLM."""
+    print(text)
     title_match = re.search(r"(?:Событие:|Задача:) (.+?)\.", text)
     start_time_match = re.search(r"Начало: (.+?)\К", text)
     end_time_match = re.search(r"Конец: ([\d\-T:\+]+)", text)
@@ -496,7 +500,6 @@ def convert_relative_to_iso(time_str):
     now = datetime.now()
     if time_str[-1] == '.':
         time_str = time_str[:-2]
-
     if "послезавтра" in time_str:
         target_date = now + timedelta(days=2)
     elif "завтра" in time_str:
@@ -542,7 +545,7 @@ def convert_relative_to_iso(time_str):
     else:
         target_datetime = target_date.replace(hour=0, minute=0)
 
-    return target_datetime.isoformat()
+    return target_datetime.replace(microsecond=0).isoformat()
 
 def process_event_details_nlp(message):
     chat_id = message.chat.id
@@ -572,8 +575,9 @@ def process_event_details_nlp(message):
 
 
 # ======== Запуск сервера и бота ========
+
 def start_fastapi():
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
 
 
 def start_telegram_bot():
@@ -583,3 +587,13 @@ def start_telegram_bot():
 if __name__ == "__main__":
     threading.Thread(target=start_fastapi).start()
     threading.Thread(target=start_telegram_bot).start()
+
+import signal
+
+def handle_exit(signum, frame):
+    bot.stop_polling()
+    print("Завершение работы приложения...")
+    exit(0)
+
+signal.signal(signal.SIGINT, handle_exit)
+signal.signal(signal.SIGTERM, handle_exit)

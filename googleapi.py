@@ -43,7 +43,7 @@ def delete_google_event(token, event_id):
     return True
 
 
-def parse_datetime_to_iso(date_time_str, tz_offset_hours=0):
+def parse_datetime_to_iso(date_time_str, tz_offset_hours=3):
     dt = datetime.strptime(date_time_str, "%Y-%m-%dT%H:%M:%S")
 
     tz_offset = timedelta(hours=tz_offset_hours)
