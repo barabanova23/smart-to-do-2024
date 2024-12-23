@@ -57,7 +57,7 @@
 - **`/list_events`** — показать список событий из Google Calendar.
 - **Неформальные сообщения** — добавление задач и событий.
 
-<a href="https://ibb.co/g7dR7cT"><img src="https://i.ibb.co/KGDrG8q/start.png" alt="start" border="0"></a>
+<a href="https://ibb.co/Rzd8n2W"><img src="https://i.ibb.co/LnHKwSf/photo-2024-12-23-15-02-58.jpg" alt="photo-2024-12-23-15-02-58" border="0"></a>
 
 <a href="https://ibb.co/c1QsWV8"><img src="https://i.ibb.co/R9cJXd6/google.png" alt="google" border="0"></a>
 
